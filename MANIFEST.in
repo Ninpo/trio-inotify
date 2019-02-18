@@ -1,0 +1,2 @@
+include versioneer.py
+include src/trio_inotify/_version.py
