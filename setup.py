@@ -15,7 +15,7 @@ setup(
     setup_requires=[
         "cffi",
     ],
-    cffi_modules=["build/inotify.py:ffi","build/ioctl.py:ffi"],
+    cffi_modules=["src/build/inotify.py:ffi","src/build/ioctl.py:ffi"],
     install_requires=[
         "trio >=0.11.0",
         "attrs",
