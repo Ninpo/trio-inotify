@@ -76,7 +76,10 @@ class TrioInotify:
         self._rev_watches[path] = wd
 
     def del_watch(self, path):
-        inotify_rm_watch(self._inotify_fd, self._rev_watches[path])
+        watch_key = self._rev_watches[path]
+        inotify_rm_watch(self._inotify_fd, watch_key)
+        del self._watches[watch_key]
+        del self._rev_watches[path]
 
     async def get_inotify_event(self):
         await trio.hazmat.checkpoint_if_cancelled()
