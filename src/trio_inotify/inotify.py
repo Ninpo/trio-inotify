@@ -5,6 +5,7 @@ import attr
 import trio
 from collections import namedtuple
 from enum import Flag
+from pathlib import Path
 from trio_inotify._inotify_bridge import (
     ffi as inotify_ffi,
     lib as inotify_lib,
@@ -28,6 +29,7 @@ InotifyMasks = Flag(
 class TrioInotify:
     _watches: dict = attr.ib(init=False, default={})
     _rev_watches: dict = attr.ib(init=False, default={})
+    _recursive: bool = attr.ib(init=False, default=False)
     _inotify_fd: int = attr.ib(init=False, default=inotify_init())
     _inotify_event_flags: InotifyMasks = attr.ib(init=False, default=InotifyMasks)
 
@@ -61,25 +63,45 @@ class TrioInotify:
             i += event_struct_size + inotify_event.len
         return inotify_events
 
+    def _add_watch_keys(self, wd, path):
+        self._watches[path] = wd
+        self._rev_watches[wd] = path
+
+    def _del_watch_keys(self, path):
+        watch_key = self._watches[path]
+        del self._watches[path]
+        del self._rev_watches[watch_key]
+
     def add_watch(self, path, watch_mask=None, recursive=False):
         if not watch_mask:
             watch_mask = self._inotify_event_flags.IN_ALL_EVENTS.value
-        if not recursive:
-            wd = inotify_add_watch(
-                self._inotify_fd,
-                path.encode("utf-8"),
+        wd = inotify_add_watch(self._inotify_fd, path.encode("utf-8"), watch_mask.value)
+        self._add_watch_keys(wd, path)
+        if recursive:
+            self._recursive = True
+            watch_mask = (
                 watch_mask
+                | self._inotify_event_flags.IN_ISDIR
+                | self._inotify_event_flags.IN_CREATE
+                | self._inotify_event_flags.IN_DELETE
             )
-        else:
-            raise NotImplemented("Recursive watches aren't implemented....yet.")
-        self._watches[wd] = path
-        self._rev_watches[path] = wd
+            for root, dirs, _ in os.walk(path):
+                for directory in dirs:
+                    full_path_str = Path(root, directory).absolute().as_posix()
+                    wd = inotify_add_watch(self._inotify_fd, full_path_str.encode("utf-8"), watch_mask.value)
+                    self._add_watch_keys(wd, full_path_str)
 
     def del_watch(self, path):
-        watch_key = self._rev_watches[path]
+        watch_key = self._watches[path]
         inotify_rm_watch(self._inotify_fd, watch_key)
-        del self._watches[watch_key]
-        del self._rev_watches[path]
+        self._del_watch_keys(path)
+        if self._recursive:
+            for root, dirs, _ in os.walk(path):
+                for directory in dirs:
+                    full_path_str = Path(root, directory).absolute().as_posix()
+                    wd = self._watches[full_path_str]
+                    inotify_rm_watch(self._inotify_fd, wd)
+                    self._del_watch_keys(full_path_str)
 
     async def get_inotify_event(self):
         await trio.hazmat.checkpoint_if_cancelled()
