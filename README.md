@@ -5,7 +5,9 @@ Inotify interface implemented in Trio
 API is currently subject to change with each release.
 
 ## Installation
+```
 pip install git+https://github.com/ninpo/trio-inotify
+```
 
 ## Usage:
 
