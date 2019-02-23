@@ -22,8 +22,8 @@ setup(
         "cffi",
     ],
     classifiers=[
-        "Development Status :: 1 - Planning",
-        "Intended Audience :: System Administrators",
+        "Development Status :: 2 - Pre-Alpha",
+        "Intended Audience :: Developers",
         "License :: OSI Approved :: Apache Software License",
         "Natural Language :: English",
         "Operating System :: POSIX :: Linux",
