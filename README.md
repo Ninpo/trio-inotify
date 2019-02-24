@@ -14,10 +14,11 @@ pip install git+https://github.com/ninpo/trio-inotify
 ### Simple File Watch for Deletes:
 ```python
 import trio
-from trio_inotify.inotify import TrioInotify, InotifyMasks
-wm = TrioInotify()
+from trio_inotify.inotify import WatchManager, Watcher, InotifyMasks
+wm = WatchManager()
 wm.add_watch("/path/to/file/or/dir", watch_mask=InotifyMasks.IN_DELETE)
-events = trio.run(wm.get_inotify_event)
+watcher = Watcher(watch_manager=wm)
+events = trio.run(watcher.get_inotify_event)
 ```
 This will block until there are inotify events, at which point you'll be returned a list of events.
 ```python
@@ -27,10 +28,11 @@ Deletes a watch.
 ### Recursive Directory Watch for File Write Events:
 ```python
 import trio
-from trio_inotify.inotify import TrioInotify, InotifyMasks
-wm = TrioInotify()
+from trio_inotify.inotify import WatchManager, Watcher, InotifyMasks
+wm = WatchManager()
 wm.add_watch("/path/to/dir", watch_mask=InotifyMasks.IN_CLOSE_WRITE, recursive=True)
-events = trio.run(wm.get_inotify_event)
+watcher = Watcher(watch_manager=wm)
+events = trio.run(watcher.get_inotify_event)
 
 ```
 `del_watch()` on a recursive watch will remove _all_ watches including from any watched sub-dirs.
@@ -47,4 +49,4 @@ wm.del_watch("/home/user/logs/subdir2")
 
 ## Coming Soon:
 - Automatic addition/removal of directory watches when recursively watching a directory on `IS_DIR|IN_CREATE`/`IS_DIR|IN_DELETE` events
-- Watcher class with the ability to pass a custom event handler that watched events are passed to.
+- Pass a custom event handler to Watcher

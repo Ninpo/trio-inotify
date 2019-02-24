@@ -26,16 +26,64 @@ InotifyMasks = Flag(
 
 
 @attr.s(auto_attribs=True)
-class TrioInotify:
+class WatchManager:
     _watches: dict = attr.ib(init=False, default={})
     _rev_watches: dict = attr.ib(init=False, default={})
-    _recursive: bool = attr.ib(init=False, default=False)
-    _inotify_fd: int = attr.ib(init=False, default=inotify_init())
-    _inotify_event_flags: InotifyMasks = attr.ib(init=False, default=InotifyMasks)
+    recursive: bool = attr.ib(init=False, default=False)
+    inotify_fd: int = attr.ib(init=False, default=inotify_init())
+    inotify_event_flags: InotifyMasks = attr.ib(init=False, default=InotifyMasks)
+
+    def _add_watch_keys(self, wd, path):
+        self._watches[path] = wd
+        self._rev_watches[wd] = path
+
+    def _del_watch_keys(self, path):
+        watch_key = self._watches[path]
+        del self._watches[path]
+        del self._rev_watches[watch_key]
+
+    def add_watch(self, path, event_mask=None, recursive=False):
+        if not event_mask:
+            event_mask = self.inotify_event_flags.IN_ALL_EVENTS
+        wd = inotify_add_watch(self.inotify_fd, path.encode("utf-8"), event_mask.value)
+        self._add_watch_keys(wd, path)
+        if recursive:
+            self.recursive = True
+            event_mask = (
+                event_mask
+                | self.inotify_event_flags.IN_ISDIR
+                | self.inotify_event_flags.IN_CREATE
+                | self.inotify_event_flags.IN_DELETE
+            )
+            for root, dirs, _ in os.walk(path):
+                for directory in dirs:
+                    full_path_str = Path(root, directory).absolute().as_posix()
+                    wd = inotify_add_watch(
+                        self.inotify_fd, full_path_str.encode("utf-8"), event_mask.value
+                    )
+                    self._add_watch_keys(wd, full_path_str)
+
+    def del_watch(self, path):
+        watch_key = self._watches[path]
+        inotify_rm_watch(self.inotify_fd, watch_key)
+        self._del_watch_keys(path)
+        if self.recursive:
+            for root, dirs, _ in os.walk(path):
+                for directory in dirs:
+                    full_path_str = Path(root, directory).absolute().as_posix()
+                    wd = self._watches[full_path_str]
+                    inotify_rm_watch(self.inotify_fd, wd)
+                    self._del_watch_keys(full_path_str)
+
+
+@attr.s(auto_attribs=True)
+class Watcher:
+    watch_manager: WatchManager = attr.ib()
+    event_handler: callable = attr.ib(default=None)
 
     def _get_fd_buffer_length(self):
         buffer = array.array("I", [0])
-        fcntl.ioctl(self._inotify_fd, ioctl_lib.FIONREAD, buffer)
+        fcntl.ioctl(self.watch_manager.inotify_fd, ioctl_lib.FIONREAD, buffer)
         return buffer[0]
 
     def _unpack_inotify_event(self, new_inotify_event):
@@ -55,7 +103,7 @@ class TrioInotify:
             inotify_events.append(
                 InotifyEvent(
                     inotify_event.wd,
-                    self._inotify_event_flags(inotify_event.mask),
+                    self.watch_manager.inotify_event_flags(inotify_event.mask),
                     inotify_event.cookie,
                     file_name,
                 )
@@ -63,56 +111,16 @@ class TrioInotify:
             i += event_struct_size + inotify_event.len
         return inotify_events
 
-    def _add_watch_keys(self, wd, path):
-        self._watches[path] = wd
-        self._rev_watches[wd] = path
-
-    def _del_watch_keys(self, path):
-        watch_key = self._watches[path]
-        del self._watches[path]
-        del self._rev_watches[watch_key]
-
-    def add_watch(self, path, watch_mask=None, recursive=False):
-        if not watch_mask:
-            watch_mask = self._inotify_event_flags.IN_ALL_EVENTS.value
-        wd = inotify_add_watch(self._inotify_fd, path.encode("utf-8"), watch_mask.value)
-        self._add_watch_keys(wd, path)
-        if recursive:
-            self._recursive = True
-            watch_mask = (
-                watch_mask
-                | self._inotify_event_flags.IN_ISDIR
-                | self._inotify_event_flags.IN_CREATE
-                | self._inotify_event_flags.IN_DELETE
-            )
-            for root, dirs, _ in os.walk(path):
-                for directory in dirs:
-                    full_path_str = Path(root, directory).absolute().as_posix()
-                    wd = inotify_add_watch(self._inotify_fd, full_path_str.encode("utf-8"), watch_mask.value)
-                    self._add_watch_keys(wd, full_path_str)
-
-    def del_watch(self, path):
-        watch_key = self._watches[path]
-        inotify_rm_watch(self._inotify_fd, watch_key)
-        self._del_watch_keys(path)
-        if self._recursive:
-            for root, dirs, _ in os.walk(path):
-                for directory in dirs:
-                    full_path_str = Path(root, directory).absolute().as_posix()
-                    wd = self._watches[full_path_str]
-                    inotify_rm_watch(self._inotify_fd, wd)
-                    self._del_watch_keys(full_path_str)
-
     async def get_inotify_event(self):
         await trio.hazmat.checkpoint_if_cancelled()
         while True:
             try:
                 new_inotify_event = os.read(
-                    self._inotify_fd, self._get_fd_buffer_length()
+                    self.watch_manager.inotify_fd, self._get_fd_buffer_length()
                 )
             except BlockingIOError:
                 pass
             else:
                 await trio.hazmat.cancel_shielded_checkpoint()
                 return self._unpack_inotify_event(new_inotify_event)
-            await trio.hazmat.wait_readable(self._inotify_fd)
+            await trio.hazmat.wait_readable(self.watch_manager.inotify_fd)
