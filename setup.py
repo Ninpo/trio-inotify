@@ -11,16 +11,10 @@ setup(
     include_package_data=True,
     package_dir={"": "src"},
     packages=find_packages("src"),
-    python_requires='~=3.6',
-    setup_requires=[
-        "cffi",
-    ],
-    cffi_modules=["src/build/inotify.py:ffi","src/build/ioctl.py:ffi"],
-    install_requires=[
-        "trio >=0.11.0",
-        "attrs",
-        "cffi",
-    ],
+    python_requires="~=3.6",
+    setup_requires=["cffi"],
+    cffi_modules=["src/build/inotify.py:ffi", "src/build/ioctl.py:ffi"],
+    install_requires=["trio >=0.11.0", "attrs", "cffi"],
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",
         "Intended Audience :: Developers",
