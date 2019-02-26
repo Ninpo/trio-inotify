@@ -23,6 +23,7 @@ setup(
         "Operating System :: POSIX :: Linux",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
+        "Framework :: Trio",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
 )
