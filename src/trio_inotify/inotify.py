@@ -1,11 +1,13 @@
+"""Tools to interact with the inotify interface
+"""
 import array
 import fcntl
 import os
 import attr
 import trio
-from collections import namedtuple
 from enum import Flag
 from pathlib import Path
+from typing import Callable, Dict, List, NamedTuple, Type
 from trio_inotify._inotify_bridge import (
     ffi as inotify_ffi,
     lib as inotify_lib,
@@ -27,28 +29,53 @@ InotifyMasks = Flag(
 
 @attr.s(auto_attribs=True)
 class WatchManager:
-    _watches: dict = attr.ib(init=False, default={})
-    _rev_watches: dict = attr.ib(init=False, default={})
+    """Add, remove and track watches on an inotify interface.
+    """
+
+    _watches: Dict[str, int] = attr.ib(init=False, default={})
+    _rev_watches: Dict[int, str] = attr.ib(init=False, default={})
     recursive: bool = attr.ib(init=False, default=False)
     inotify_fd: int = attr.ib(init=False, default=inotify_init())
-    inotify_event_flags: InotifyMasks = attr.ib(init=False, default=InotifyMasks)
+    inotify_event_flags: Type[InotifyMasks] = attr.ib(init=False, default=InotifyMasks)
 
-    def _add_watch_keys(self, wd, path):
+    def _add_watch_keys(self, wd: int, path: str) -> None:
+        """Add new watch to internal lookup dictionaries.
+
+        :param int wd: Watch descriptor
+        :param str path: File/directory being watched
+        :return: None
+        """
         self._watches[path] = wd
         self._rev_watches[wd] = path
 
-    def _del_watch_keys(self, path):
-        watch_key = self._watches[path]
+    def _del_watch_keys(self, path: str):
+        """Remove watches from internal lookup dictionaries.
+
+        :param str path: File/directory no longer being watched.
+        :return: None
+        """
+        watch_key: int = self._watches[path]
         del self._watches[path]
         del self._rev_watches[watch_key]
 
-    def add_watch(self, path, event_mask=None, recursive=False):
+    def add_watch(
+        self, path: str, event_mask: InotifyMasks = None, recursive: bool = False
+    ) -> None:
+        """Add new watch to inotify interface and track.
+
+        :param str path: File/directory to watch.
+        :param InotifyMasks event_mask: inotify events to watch for.
+        :param bool recursive: Include subdirectories/newly created directories.
+        :return: None
+        """
         if not event_mask:
             event_mask = self.inotify_event_flags.IN_ALL_EVENTS
-        wd = inotify_add_watch(self.inotify_fd, path.encode("utf-8"), event_mask.value)
+        wd: int = inotify_add_watch(
+            self.inotify_fd, path.encode("utf-8"), event_mask.value
+        )
         self._add_watch_keys(wd, path)
         if recursive:
-            self.recursive = True
+            self.recursive: bool = True
             event_mask = (
                 event_mask
                 | self.inotify_event_flags.IN_ISDIR
@@ -63,33 +90,57 @@ class WatchManager:
                     )
                     self._add_watch_keys(wd, full_path_str)
 
-    def del_watch(self, path):
-        watch_key = self._watches[path]
+    def del_watch(self, path: str) -> None:
+        """Remove a watch.  Removes recursively if removing a recursive watch member.
+
+        :param str path: File/directory to stop watching.
+        :return: None
+        """
+        watch_key: int = self._watches[path]
         inotify_rm_watch(self.inotify_fd, watch_key)
         self._del_watch_keys(path)
         if self.recursive:
             for root, dirs, _ in os.walk(path):
                 for directory in dirs:
-                    full_path_str = Path(root, directory).absolute().as_posix()
-                    wd = self._watches[full_path_str]
+                    full_path: str = Path(root, directory).absolute().as_posix()
+                    wd: int = self._watches[full_path]
                     inotify_rm_watch(self.inotify_fd, wd)
-                    self._del_watch_keys(full_path_str)
+                    self._del_watch_keys(full_path)
+
+
+class InotifyEvent(NamedTuple):
+    wd: int
+    mask: InotifyMasks
+    cookie: int
+    file_name: bytes
 
 
 @attr.s(auto_attribs=True)
 class Watcher:
-    watch_manager: WatchManager = attr.ib()
-    event_handler: callable = attr.ib(default=None)
+    """Watch for inotify events on established watches.  Optionally pass events to an event handler.
+    """
 
-    def _get_fd_buffer_length(self):
+    watch_manager: WatchManager = attr.ib()
+    event_handler: Callable = attr.ib(default=None)
+
+    def _get_fd_buffer_length(self) -> int:
+        """Check length of inotify file descriptor.
+
+        :return int: Length in bytes of the inotify file descriptor.
+        """
         buffer = array.array("I", [0])
         fcntl.ioctl(self.watch_manager.inotify_fd, ioctl_lib.FIONREAD, buffer)
         return buffer[0]
 
-    def _unpack_inotify_event(self, new_inotify_event):
-        InotifyEvent = namedtuple("InotifyEvent", "wd mask cookie file_name")
-        inotify_events = []
-        event_struct_size = inotify_ffi.sizeof("struct inotify_event")
+    def _unpack_inotify_event(self, new_inotify_event) -> List[InotifyEvent]:
+        """Unpack bytes from inotify file descriptor.
+
+        :param bytes new_inotify_event:
+        :return list inotify_events:
+        """
+
+        inotify_events: List[InotifyEvent] = []
+        event_struct_size: int = inotify_ffi.sizeof("struct inotify_event")
         string_buffer = inotify_ffi.new("char[]", len(new_inotify_event))
         string_buffer[0 : len(new_inotify_event)] = new_inotify_event
         i = 0
@@ -111,11 +162,15 @@ class Watcher:
             i += event_struct_size + inotify_event.len
         return inotify_events
 
-    async def get_inotify_event(self):
+    async def get_inotify_event(self) -> List[InotifyEvent]:
+        """Read bytes from inotify descriptor if available.
+
+        :return list: One or more ``NamedTuple`` objects containing event data.
+        """
         await trio.hazmat.checkpoint_if_cancelled()
         while True:
             try:
-                new_inotify_event = os.read(
+                new_inotify_event: bytes = os.read(
                     self.watch_manager.inotify_fd, self._get_fd_buffer_length()
                 )
             except BlockingIOError:
