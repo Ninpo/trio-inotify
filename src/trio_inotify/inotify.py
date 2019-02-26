@@ -108,11 +108,15 @@ class WatchManager:
                     self._del_watch_keys(full_path)
 
 
-class InotifyEvent(NamedTuple):
-    wd: int
-    mask: InotifyMasks
-    cookie: int
-    file_name: bytes
+@attr.s(auto_attribs=True)
+class InotifyEvent:
+    """Unpacked inotify event bytes.
+    """
+
+    wd: int = attr.ib()
+    mask: InotifyMasks = attr.ib()
+    cookie: int = attr.ib()
+    file_name: bytes = attr.ib()
 
 
 @attr.s(auto_attribs=True)
