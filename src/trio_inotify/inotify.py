@@ -111,6 +111,11 @@ class WatchManager:
 @attr.s(auto_attribs=True)
 class InotifyEvent:
     """Unpacked inotify event bytes.
+
+    :ivar int wd: Watch file descriptor.
+    :ivar InotifyMasks mask: Inotify event mask.
+    :ivar int cookie: Inotify event cookie if applicable.
+    :ivar bytes file_name: File path associated with event.
     """
 
     wd: int = attr.ib()
