@@ -1,6 +1,6 @@
 attrs==19.1.0
 cffi==1.12.2
-Sphinx==1.8.4
+Sphinx==2.2.1
 sphinx-rtd-theme==0.4.3
 sphinxcontrib-websupport==1.1.0
 trio==0.11.0
