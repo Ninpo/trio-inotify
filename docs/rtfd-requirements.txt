@@ -2,6 +2,6 @@ attrs==19.1.0
 cffi==1.12.2
 Sphinx==1.8.4
 sphinx-rtd-theme==0.4.3
-sphinxcontrib-websupport==1.1.0
+sphinxcontrib-websupport==1.2.2
 trio==0.11.0
 git+https://github.com/Ninpo/trio-inotify.git
